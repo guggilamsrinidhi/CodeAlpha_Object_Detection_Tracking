@@ -5,47 +5,42 @@ import os
 from PIL import Image
 from ultralytics import YOLO
 
-# Page configuration
+# -----------------------------
+# Page settings
+# -----------------------------
 st.set_page_config(
     page_title="Object Detection & Tracking",
-    page_icon="🎯",
-    layout="centered"
+    page_icon="🎯"
 )
 
-# Title
 st.title("🎯 Object Detection & Tracking")
 st.write("Upload an image or video to detect and track objects.")
 
+# -----------------------------
 # Load YOLO model
+# -----------------------------
 @st.cache_resource
 def load_model():
     return YOLO("yolov8n.pt")
 
 model = load_model()
 
-# File uploader
+# -----------------------------
+# Upload image or video
+# -----------------------------
 uploaded_file = st.file_uploader(
     "Upload Image or Video",
-    type=[
-        "jpg",
-        "jpeg",
-        "png",
-        "mp4",
-        "avi",
-        "mov",
-        "mkv"
-    ]
+    type=["jpg", "jpeg", "png", "mp4", "avi", "mov", "mkv"]
 )
 
 if uploaded_file is not None:
 
-    # Get file type
-    file_type = uploaded_file.type
+    file_name = uploaded_file.name.lower()
 
-    # =========================
-    # IMAGE DETECTION
-    # =========================
-    if file_type.startswith("image"):
+    # ==================================================
+    # IMAGE
+    # ==================================================
+    if file_name.endswith((".jpg", ".jpeg", ".png")):
 
         image = Image.open(uploaded_file)
 
@@ -57,14 +52,15 @@ if uploaded_file is not None:
             with st.spinner("Detecting objects..."):
 
                 results = model.predict(
-                    source=image,
+                    image,
                     conf=0.25,
                     verbose=False
                 )
 
                 detected_image = results[0].plot()
 
-            st.subheader("🎯 Detected Objects")
+            st.subheader("🎯 Detected Image")
+
             st.image(
                 detected_image,
                 channels="BGR",
@@ -73,124 +69,141 @@ if uploaded_file is not None:
 
             st.success("✅ Object detection completed!")
 
-    # =========================
-    # VIDEO DETECTION & TRACKING
-    # =========================
-    elif file_type.startswith("video"):
+    # ==================================================
+    # VIDEO
+    # ==================================================
+    elif file_name.endswith((".mp4", ".avi", ".mov", ".mkv")):
 
-        # Save uploaded video temporarily
-        input_file = tempfile.NamedTemporaryFile(
+        # Save uploaded video
+        input_temp = tempfile.NamedTemporaryFile(
             delete=False,
             suffix=".mp4"
         )
 
-        input_path = input_file.name
+        input_path = input_temp.name
 
-        input_file.write(uploaded_file.getbuffer())
-        input_file.close()
+        input_temp.write(uploaded_file.getbuffer())
+        input_temp.close()
 
         st.subheader("🎥 Original Video")
         st.video(input_path)
 
         if st.button("▶️ Start Detection & Tracking"):
 
-            output_path = tempfile.NamedTemporaryFile(
-                delete=False,
-                suffix=".mp4"
-            ).name
-
-            cap = cv2.VideoCapture(input_path)
-
-            if not cap.isOpened():
-                st.error("❌ Could not open the uploaded video.")
-                os.remove(input_path)
-                st.stop()
-
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-
-            if fps <= 0:
-                fps = 30
-
-            # MP4 output
-            fourcc = cv2.VideoWriter_fourcc(
-                *"mp4v"
-            )
-
-            out = cv2.VideoWriter(
-                output_path,
-                fourcc,
-                fps,
-                (width, height)
-            )
-
-            total_frames = int(
-                cap.get(cv2.CAP_PROP_FRAME_COUNT)
-            )
-
-            progress = st.progress(0)
-
             with st.spinner(
-                "🔄 Detecting and tracking objects..."
+                "🔄 Processing video... Please wait."
             ):
 
-                frame_count = 0
+                cap = cv2.VideoCapture(input_path)
 
-                while cap.isOpened():
+                if not cap.isOpened():
+                    st.error("❌ Could not open the video.")
+                    st.stop()
+
+                width = int(
+                    cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                )
+
+                height = int(
+                    cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                )
+
+                fps = cap.get(
+                    cv2.CAP_PROP_FPS
+                )
+
+                if fps <= 0:
+                    fps = 30
+
+                # Output file
+                output_path = tempfile.NamedTemporaryFile(
+                    delete=False,
+                    suffix=".mp4"
+                ).name
+
+                fourcc = cv2.VideoWriter_fourcc(
+                    *"mp4v"
+                )
+
+                out = cv2.VideoWriter(
+                    output_path,
+                    fourcc,
+                    fps,
+                    (width, height)
+                )
+
+                total_frames = int(
+                    cap.get(
+                        cv2.CAP_PROP_FRAME_COUNT
+                    )
+                )
+
+                progress = st.progress(0)
+
+                frame_number = 0
+
+                while True:
 
                     ret, frame = cap.read()
 
                     if not ret:
                         break
 
-                    # YOLO tracking
+                    # Use ByteTrack
                     results = model.track(
                         frame,
                         persist=True,
+                        tracker="bytetrack.yaml",
                         conf=0.25,
                         verbose=False
                     )
 
-                    # Draw detections
+                    # Draw boxes and tracking IDs
                     annotated_frame = results[0].plot()
 
-                    # Write frame
                     out.write(annotated_frame)
 
-                    frame_count += 1
+                    frame_number += 1
 
                     if total_frames > 0:
-                        progress.progress(
-                            min(
-                                frame_count / total_frames,
-                                1.0
-                            )
+
+                        percentage = (
+                            frame_number / total_frames
                         )
 
-            cap.release()
-            out.release()
+                        progress.progress(
+                            min(percentage, 1.0)
+                        )
 
-            progress.progress(1.0)
+                cap.release()
+                out.release()
+
+                progress.progress(1.0)
 
             st.success(
-                "✅ Object detection and tracking completed!"
+                "✅ Detection and tracking completed!"
             )
 
-            # Show result
             st.subheader("🎯 Processed Video")
+
             st.video(output_path)
 
-            # Download result
-            with open(output_path, "rb") as video_file:
+            # Download button
+            with open(output_path, "rb") as video:
 
                 st.download_button(
                     label="⬇️ Download Output Video",
-                    data=video_file,
+                    data=video,
                     file_name="object_detection_tracking.mp4",
                     mime="video/mp4"
                 )
 
-            # Remove input temporary file
+            # Remove temporary input
             if os.path.exists(input_path):
                 os.remove(input_path)
+
+    else:
+
+        st.error(
+            "❌ Please upload a JPG, PNG, MP4, AVI, MOV, or MKV file."
+        )
