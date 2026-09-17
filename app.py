@@ -86,4 +86,4 @@ if uploaded_file is not None:
                 mime="video/mp4"
             )
 
-        os.remove(input_path)
+        os.remove(input_path
